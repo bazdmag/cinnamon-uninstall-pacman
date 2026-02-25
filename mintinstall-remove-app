@@ -1,0 +1,111 @@
+#!/usr/bin/python3
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GLib, Gdk
+
+import sys
+import os
+from pathlib import Path
+import subprocess
+
+class FlatpakUninstaller:
+    def __init__(self, desktop_file):
+        self.desktop_file = desktop_file
+        self.progress_window = None
+        self.pkg_name = None
+        self.error = None
+
+        # Determine the Flatpak app ID
+        self.app_id = self.get_flatpak_app_id()
+        if self.app_id is None:
+            print(f"Package for '{self.desktop_file}' not found or not a Flatpak app")
+            sys.exit(1)
+
+        # Start uninstallation
+        self.uninstall_flatpak_app()
+
+    def get_flatpak_app_id(self):
+        """
+        Extract the Flatpak app ID from a .desktop file.
+        Looks for X-Flatpak= or Exec=flatpak run <app-id>
+        """
+        path = Path(self.desktop_file)
+        if not path.exists():
+            return None
+
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("X-Flatpak="):
+                    return line.split("=", 1)[1]
+                if line.startswith("Exec=flatpak run "):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        return parts[2]
+        return None
+
+    def uninstall_flatpak_app(self):
+        """
+        Runs `flatpak uninstall -y <app-id>` with a GTK progress window
+        """
+        self.progress_window = Gtk.Dialog()
+        self.progress_window.set_default_size(400, -1)
+        self.progress_window.set_title("Removing Flatpak App")
+        self.progress_window.connect("delete-event", self.dialog_delete_event)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        self.progress_window.get_content_area().pack_start(box, True, True, 0)
+
+        self.pkg_name = Gtk.Label(max_width_chars=45, wrap=True)
+        box.pack_start(self.pkg_name, True, False, 6)
+        spinner = Gtk.Spinner(active=True)
+        spinner.set_size_request(36, 36)
+        box.pack_start(spinner, True, False, 0)
+        self.pkg_name.set_label(self.app_id)
+
+        self.progress_window.show_all()
+
+        # Run uninstall in background
+        GLib.idle_add(self.run_uninstall_command)
+
+        Gtk.main()
+
+    def run_uninstall_command(self):
+        try:
+            result = subprocess.run(
+                ["flatpak", "uninstall", "-y", self.app_id],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if result.returncode != 0:
+                self.error = result.stderr.strip()
+                print(f"Could not remove {self.app_id}: {self.error}")
+            else:
+                print(f"Successfully removed {self.app_id}")
+        except Exception as e:
+            self.error = str(e)
+            print(f"Error removing {self.app_id}: {self.error}")
+
+        # Close the progress window after a short delay
+        Gdk.threads_add_timeout_seconds(GLib.PRIORITY_DEFAULT, 1, self.destroy_window)
+        return False
+
+    def dialog_delete_event(self, widget, event):
+        # Users can't cancel halfway because flatpak is run in subprocess
+        return True
+
+    def destroy_window(self, *args):
+        if self.progress_window is not None:
+            self.progress_window.destroy()
+        Gtk.main_quit()
+        return False
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or not os.path.exists(sys.argv[1]) or not sys.argv[1].endswith(".desktop"):
+        print("Usage: python3 flatpak-uninstall.py /full/path/to/app.desktop")
+        sys.exit(1)
+
+    FlatpakUninstaller(sys.argv[1])
+    sys.exit(0)
