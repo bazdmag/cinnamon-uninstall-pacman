@@ -1,11 +1,4 @@
 #!/usr/bin/python3
-'''
-Arch port of cinnamon-remove-application
-
-Created on 17.04.2021
-
-@author: stephan
-'''
 
 import gettext
 import os
