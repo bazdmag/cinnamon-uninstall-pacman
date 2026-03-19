@@ -30,7 +30,7 @@ class RemoveExecuter(threading.Thread):
         self.package = package
 
     def run(self):
-        cmd = ["pkexec", "/usr/bin/pacman", "-Rc", "--noconfirm", "--noprogressbar", self.package]
+        cmd = ["pkexec", "/usr/bin/pacman", "-Rns", "--noconfirm", "--noprogressbar", self.package]
         comnd = Popen(cmd)
         sys.exit(comnd.wait())
 
