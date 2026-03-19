@@ -1,4 +1,11 @@
 #!/usr/bin/python3
+'''
+Arch port of cinnamon-remove-application
+
+Created on 17.04.2021
+
+@author: stephan
+'''
 
 import gettext
 import os
@@ -12,8 +19,9 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 from subprocess import Popen
 
+# To see translation, copy mint-common.mo from /usr/share/linuxmint/locale/<lang>/LC_MESSAGES on Mint to /usr/share/locale/<lang>/LC_MESSAGES on Arch
+# i18n
 gettext.install("mint-common", "/usr/share/locale")
-
 
 class RemoveExecuter(threading.Thread):
 
@@ -22,74 +30,36 @@ class RemoveExecuter(threading.Thread):
         self.package = package
 
     def run(self):
-        cmd = [
-            "pkexec",
-            "/usr/bin/pacman",
-            "-Rns",
-            "--noconfirm",
-            self.package
-        ]
+        cmd = ["pkexec", "/usr/bin/pacman", "-Rc", "--noconfirm", "--noprogressbar", self.package]
         comnd = Popen(cmd)
         sys.exit(comnd.wait())
-
 
 class MintRemoveWindow:
 
     def __init__(self, desktopFile):
         self.desktopFile = desktopFile
-
-        # --- FIXED: safer package lookup ---
-        process = subprocess.run(
-            ["pacman", "-Qoq", self.desktopFile],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True
-        )
-
-        output = process.stdout.strip()
-
-        package = None
-        if output:
-            package = output.splitlines()[0].split(",")[0].strip()
-
-        # If no package found, try flatpak fallback or file removal prompt
-        if process.returncode != 0 or not package:
-
+        process = subprocess.run(["pacman", "-Qoq", self.desktopFile], stdout=subprocess.PIPE)
+        output = process.stdout.decode("utf-8")
+        package = output[:output.find(":")].split(",")[0]
+        if process.returncode != 0:
             if not self.try_remove_flatpak(desktopFile):
-
-                warnDlg = Gtk.MessageDialog(
-                    parent=None,
-                    flags=0,
-                    message_type=Gtk.MessageType.WARNING,
-                    buttons=Gtk.ButtonsType.YES_NO,
-                    text=_("This menu item is not associated to any package. Do you want to remove it from the menu anyway?")
-                )
-
+                warnDlg = Gtk.MessageDialog(parent=None, flags=0, message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO, text=_("This menu item is not associated to any package. Do you want to remove it from the menu anyway?"))
                 warnDlg.set_keep_above(True)
+
                 warnDlg.get_widget_for_response(Gtk.ResponseType.YES).grab_focus()
                 warnDlg.vbox.set_spacing(10)
-
                 response = warnDlg.run()
-
                 if response == Gtk.ResponseType.YES:
-                    print("removing '%s'" % self.desktopFile)
+                    print ("removing '%s'" % self.desktopFile)
                     subprocess.run(["rm", "-f", self.desktopFile])
                     subprocess.run(["rm", "-f", "%s.desktop" % self.desktopFile])
-
                 warnDlg.destroy()
 
             sys.exit(0)
 
-        # --- FIXED: dependency listing (correct tool usage) ---
-        warnDlg = Gtk.MessageDialog(
-            parent=None,
-            flags=0,
-            message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.OK_CANCEL,
-            text=_("The following packages will be removed:")
-        )
-
+        warnDlg = Gtk.MessageDialog(parent=None, flags=0, message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK_CANCEL, text=_("The following packages will be removed:"))
         warnDlg.set_keep_above(True)
+
         warnDlg.get_widget_for_response(Gtk.ResponseType.OK).grab_focus()
         warnDlg.vbox.set_spacing(10)
 
@@ -102,15 +72,11 @@ class MintRemoveWindow:
 
         packages = []
         model = Gtk.ListStore(str)
-
-        # FIXED: correct reverse dependency lookup
-        dependenciesString = subprocess.getoutput(f"pactree -r {package}")
+        dependenciesString = subprocess.getoutput("pacman -Rpc " + package)
         dependencies = dependenciesString.split("\n")
-
         for dependency in dependencies:
             model.append([dependency])
             packages.append(dependency.split()[0])
-
         treeview.set_model(model)
         treeview.show()
 
@@ -123,29 +89,23 @@ class MintRemoveWindow:
         warnDlg.get_content_area().add(scrolledwindow)
 
         response = warnDlg.run()
-
         if response == Gtk.ResponseType.OK:
             executer = RemoveExecuter(package)
             executer.start()
             executer.join()
-
         elif response == Gtk.ResponseType.CANCEL:
             sys.exit(0)
 
         warnDlg.destroy()
 
     def try_remove_flatpak(self, desktopFile):
-
         if not "flatpak" in desktopFile:
             return False
 
         if not os.path.exists('/usr/bin/mintinstall-remove-app'):
             return False
 
-        flatpak_remover = subprocess.Popen(
-            ['/usr/bin/mintinstall-remove-app', desktopFile]
-        )
-
+        flatpak_remover = subprocess.Popen(['/usr/bin/mintinstall-remove-app', desktopFile])
         retcode = flatpak_remover.wait()
 
         return retcode == 0
@@ -153,9 +113,9 @@ class MintRemoveWindow:
     def on_finished(self, transaction=None, exit_state=None):
         sys.exit(0)
 
-
 if __name__ == "__main__":
 
+    # Exit if the given path does not exist
     if len(sys.argv) < 2 or not os.path.exists(sys.argv[1]):
         sys.exit(1)
 
